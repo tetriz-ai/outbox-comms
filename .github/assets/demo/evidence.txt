@@ -1,0 +1,17 @@
+Synthetic walkthrough reference. The original capture revision is unavailable in this repository.
+The commands and expected example output below are reproduction guidance, not evidence of a current run.
+
+Reproduction commands (repository root):
+OUTBOX_COMMS_GRPC_PORT=19090 go run ./examples/send-a-notice
+# Run twice against the isolated local compose stack.
+# Mailpit and the Slack stub both have one message after each run.
+
+Observed output:
+handle: export-ready:2026-10-01
+CHANNEL_EMAIL jane@example.com MESSAGE_STATUS_SENT
+CHANNEL_SLACK C0EXPORTS MESSAGE_STATUS_DELIVERED
+handle: export-ready:2026-10-01
+CHANNEL_EMAIL jane@example.com MESSAGE_STATUS_SENT
+CHANNEL_SLACK C0EXPORTS MESSAGE_STATUS_DELIVERED
+first: Mailpit total=1; Slack stub messages=1
+repeat: Mailpit total=1; Slack stub messages=1

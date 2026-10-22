@@ -1,0 +1,121 @@
+# Local stack: the service, Postgres, Redis, Mailpit (catches every email; web UI
+# on http://127.0.0.1:8025) and a Slack stub (lists posts at
+# http://127.0.0.1:8090/messages). Every published port binds to 127.0.0.1: the
+# gRPC API has no authentication. Each host port moves with its variable:
+# OUTBOX_COMMS_GRPC_PORT, OUTBOX_COMMS_HTTP_PORT, OUTBOX_COMMS_STUB_PORT and
+# OUTBOX_COMMS_MAILPIT_PORT; the examples and scripts read the same variables.
+# The service is built from this checkout and tagged outbox-comms:local, never a
+# release tag, so a local build cannot pass for a published image.
+# compose.release.yaml runs the published image instead. OUTBOX_COMMS_IMAGE
+# renames the local tag, so a second stack (`-p <name>`) does not overwrite the
+# first one's.
+# The passwords and token below are local-only.
+#
+# The e2e profile adds a fake SES and ElasticMQ (a local SQS) for scripts/e2e.sh;
+# a plain `compose up` does not start them. ElasticMQ is pulled, not shipped.
+name: outbox-comms
+
+services:
+  postgres:
+    image: docker.io/library/postgres:18-alpine
+    environment:
+      POSTGRES_USER: outbox
+      POSTGRES_PASSWORD: outbox-local-only
+      POSTGRES_DB: outbox_comms
+    healthcheck:
+      # Over TCP: on first start the image runs a temporary server on the Unix
+      # socket only, then restarts, so a socket check can pass before the real one.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "outbox", "-d", "outbox_comms"]
+      interval: 2s
+      retries: 30
+    volumes:
+      - pgdata:/var/lib/postgresql
+
+  redis:
+    image: docker.io/library/redis:8.10-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 30
+
+  mailpit:
+    image: docker.io/axllent/mailpit:v1.30
+    ports:
+      - "127.0.0.1:${OUTBOX_COMMS_MAILPIT_PORT:-8025}:8025"
+
+  slack-stub:
+    # Synthetic provider binaries are built only into the demo target.
+    image: ${OUTBOX_COMMS_IMAGE:-outbox-comms:local}-demo
+    build:
+      context: .
+      target: demo
+      args:
+        VERSION: v0.1.0
+    entrypoint: ["/usr/local/bin/slack-stub"]
+    command: ["-addr", ":8090"]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/outbox-comms", "health", "http://127.0.0.1:8090/healthz"]
+      interval: 2s
+      retries: 30
+    ports:
+      - "127.0.0.1:${OUTBOX_COMMS_STUB_PORT:-8090}:8090"
+
+  fake-ses:
+    # Answers SES SendEmail and SendRawEmail locally; GET /calls lists them.
+    profiles: ["e2e"]
+    image: ${OUTBOX_COMMS_IMAGE:-outbox-comms:local}-demo
+    build:
+      context: .
+      target: demo
+      args:
+        VERSION: v0.1.0
+    entrypoint: ["/usr/local/bin/fake-ses"]
+    command: ["-addr", ":8095"]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/outbox-comms", "health", "http://127.0.0.1:8095/healthz"]
+      interval: 2s
+      retries: 30
+    ports:
+      - "127.0.0.1:${OUTBOX_COMMS_SES_PORT:-8095}:8095"
+
+  elasticmq:
+    # A local SQS with the three queues in e2e/elasticmq.conf.
+    profiles: ["e2e"]
+    image: docker.io/softwaremill/elasticmq-native@sha256:e4580ab9ad1bd5cd37b4ba04911bc5ccc8cd2d9ab4de56ece65acee71c24e05c
+    volumes:
+      - ./e2e/elasticmq.conf:/opt/elasticmq.conf:ro
+    ports:
+      - "127.0.0.1:${OUTBOX_COMMS_SQS_PORT:-9324}:9324"
+
+  outbox-comms:
+    image: ${OUTBOX_COMMS_IMAGE:-outbox-comms:local}
+    build:
+      context: .
+      args:
+        VERSION: v0.1.0
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      mailpit: {condition: service_started}
+      slack-stub: {condition: service_healthy}
+    environment:
+      OUTBOX_COMMS_GRPC_ADDR: :9090
+      OUTBOX_COMMS_HTTP_ADDR: :8080
+      OUTBOX_COMMS_GRPC_REFLECTION: "true"
+      OUTBOX_COMMS_DATABASE_URL: postgres://outbox:outbox-local-only@postgres:5432/outbox_comms?sslmode=disable
+      OUTBOX_COMMS_REDIS_ADDR: redis:6379
+      OUTBOX_COMMS_SMTP_ADDR: mailpit:1025
+      OUTBOX_COMMS_EMAIL_FROM: Example Corp <noreply@example.com>
+      OUTBOX_COMMS_BRAND_NAME: Example Corp
+      OUTBOX_COMMS_SLACK_API_URL: http://slack-stub:8090/api
+      OUTBOX_COMMS_SLACK_BOT_TOKEN: local-only-token
+      OUTBOX_COMMS_ATTACHMENTS_DIR: /data/attachments
+    ports:
+      - "127.0.0.1:${OUTBOX_COMMS_GRPC_PORT:-9090}:9090"
+      - "127.0.0.1:${OUTBOX_COMMS_HTTP_PORT:-8080}:8080"
+    volumes:
+      - attachments:/data/attachments
+
+volumes:
+  pgdata:
+  attachments:

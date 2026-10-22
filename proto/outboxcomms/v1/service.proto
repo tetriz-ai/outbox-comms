@@ -1,0 +1,72 @@
+// Copyright 2026 Workloom Solutions Private Limited
+// SPDX-License-Identifier: MIT
+
+syntax = "proto3";
+
+package outboxcomms.v1;
+
+option go_package = "github.com/tetriz-ai/outbox-comms/gen/outboxcomms/v1;outboxcommsv1";
+
+import "outboxcomms/v1/messages.proto";
+import "outboxcomms/v1/preferences.proto";
+
+// CommsService is the API producers call to send and track messages. The
+// queues behind it are internal, so producers never touch one. The service
+// carries no authentication of its own: every RPC trusts the organization_id it
+// is given.
+service CommsService {
+  // SubmitComms persists a request row, enqueues the request, and returns a
+  // handle. Idempotent on (organization_id, idempotency_key): re-submitting the
+  // same request returns the same handle with no re-processing. A key already
+  // used for a different request (usecase, params, content, entries or delivery
+  // guarantee) is ALREADY_EXISTS, and nothing is stored or sent.
+  rpc SubmitComms(SubmitCommsRequest) returns (SubmitCommsResponse);
+
+  // GetCommsStatus returns a request, by handle: its fan-out status, each
+  // message's status, whether every message has reached a terminal state
+  // (done), and whether any ended undelivered (is_partial).
+  rpc GetCommsStatus(GetCommsStatusRequest) returns (GetCommsStatusResponse);
+
+  // CheckSendEligibility is an advisory, read-only preflight: per channel, would
+  // this send proceed now? Not authoritative; the dispatcher re-checks.
+  rpc CheckSendEligibility(CheckSendEligibilityRequest) returns (CheckSendEligibilityResponse);
+
+  // ListMessages returns the org's messages newest-first, keyset-paginated on
+  // (created_at, id).
+  rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
+
+  // GetMessageEvents returns one message's delivery-event timeline (sent,
+  // delivered, bounce, complaint) oldest-first.
+  rpc GetMessageEvents(GetMessageEventsRequest) returns (GetMessageEventsResponse);
+
+  // GetPersonPreferences returns the preference rows of the person named by person_id.
+  rpc GetPersonPreferences(GetPersonPreferencesRequest) returns (GetPersonPreferencesResponse);
+
+  // UpdatePersonPreferences upserts preference cells for the person named by person_id.
+  rpc UpdatePersonPreferences(UpdatePersonPreferencesRequest) returns (UpdatePersonPreferencesResponse);
+
+  // GetOrgPreferences returns the org-default (ORG tier) preference rows.
+  rpc GetOrgPreferences(GetOrgPreferencesRequest) returns (GetOrgPreferencesResponse);
+
+  // SetOrgPreferences upserts the org-default preference cells.
+  rpc SetOrgPreferences(SetOrgPreferencesRequest) returns (SetOrgPreferencesResponse);
+
+  // GetDestinations returns every routing destination of the org, each with its
+  // scope: the organization itself (ORG) or one person (PERSON).
+  rpc GetDestinations(GetDestinationsRequest) returns (GetDestinationsResponse);
+
+  // SetDestination sets the routing destination for one scope, usecase and
+  // channel, replacing the one set before for that same scope: one channel per
+  // (scope, usecase, channel). The scope is ORG, with entity_id the
+  // organization_id, or PERSON, with entity_id a person UUID. Any other entity
+  // type is INVALID_ARGUMENT.
+  rpc SetDestination(SetDestinationRequest) returns (SetDestinationResponse);
+
+  // PurgeOrgComms deletes an org's requests, messages, events, preferences and
+  // destinations. Suppressions survive: they are a fact about an address, not
+  // about the org. For each purged email message with a provider message id it
+  // keeps a tombstone (that id and the lowercased address, no org) until
+  // OUTBOX_COMMS_PURGE_TOMBSTONE_TTL passes, so a late bounce or complaint still
+  // suppresses the address.
+  rpc PurgeOrgComms(PurgeOrgCommsRequest) returns (PurgeOrgCommsResponse);
+}

@@ -1,0 +1,138 @@
+// Copyright 2026 Workloom Solutions Private Limited
+// SPDX-License-Identifier: MIT
+
+syntax = "proto3";
+
+package outboxcomms.v1;
+
+option go_package = "github.com/tetriz-ai/outbox-comms/gen/outboxcomms/v1;outboxcommsv1";
+
+import "buf/validate/validate.proto";
+import "outboxcomms/v1/enums.proto";
+
+// Preference is one cell of the preference gate (entity × category × channel →
+// enabled): the "whether to send" control.
+message Preference {
+  // entity_type is the tier: ORG (admin default) or PERSON (user override).
+  EntityType entity_type = 1;
+  // entity_id is the org_id for ORG, person_id for PERSON.
+  string entity_id = 2;
+  // category is the consent class this cell governs (product/alert/marketing).
+  MessageCategory category = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // channel is the medium this cell governs.
+  Channel channel = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // enabled is whether sends of this (category, channel) are allowed.
+  bool enabled = 5;
+}
+
+// Destination is one routing destination (usecase → chat channel) — the
+// "where to send" config. Chat-only.
+message Destination {
+  // entity_type is the scope: ORG (admin) or PERSON (user's own); any other
+  // value is INVALID_ARGUMENT.
+  EntityType entity_type = 1;
+  // entity_id is the organization_id for ORG, the person_id for PERSON (never
+  // the organization_id).
+  string entity_id = 2;
+  // usecase is the usecase key this destination routes.
+  string usecase = 3 [(buf.validate.field).string.min_len = 1];
+  // channel is the medium; only SLACK has destinations.
+  Channel channel = 4 [(buf.validate.field).enum = {in: [2]}];
+  // destination_kind is CHANNEL, or unspecified, read as CHANNEL; any other
+  // value is INVALID_ARGUMENT.
+  DestinationKind destination_kind = 5 [(buf.validate.field).enum = {in: [0, 1]}];
+  // destination_ref is the chat channel id; non-empty so a configured route
+  // never resolves to an empty Slack recipient.
+  string destination_ref = 6 [(buf.validate.field).string.min_len = 1];
+}
+
+// GetPersonPreferencesRequest reads the preference rows of the person named by person_id.
+message GetPersonPreferencesRequest {
+  // organization_id is the person's organization.
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  // person_id is the person whose preferences these are.
+  string person_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+// GetPersonPreferencesResponse returns the person's preference rows.
+message GetPersonPreferencesResponse {
+  // preferences are the person's set cells (absence = the code default).
+  repeated Preference preferences = 1;
+}
+
+// UpdatePersonPreferencesRequest upserts preference cells for the person named by person_id.
+message UpdatePersonPreferencesRequest {
+  // organization_id is the person's organization.
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  // person_id is the person whose preferences these are.
+  string person_id = 2 [(buf.validate.field).string.uuid = true];
+  // preferences are the cells to upsert.
+  repeated Preference preferences = 3;
+}
+
+// UpdatePersonPreferencesResponse is the empty ack.
+message UpdatePersonPreferencesResponse {}
+
+// GetOrgPreferencesRequest reads the org-default (ORG tier) preference rows.
+message GetOrgPreferencesRequest {
+  // organization_id is the org.
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+// GetOrgPreferencesResponse returns the org-default preference rows.
+message GetOrgPreferencesResponse {
+  // preferences are the org-default cells.
+  repeated Preference preferences = 1;
+}
+
+// SetOrgPreferencesRequest upserts the org-default (ORG tier) preference cells.
+message SetOrgPreferencesRequest {
+  // organization_id is the org.
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  // preferences are the org-default cells to upsert.
+  repeated Preference preferences = 2;
+}
+
+// SetOrgPreferencesResponse is the empty ack.
+message SetOrgPreferencesResponse {}
+
+// GetDestinationsRequest reads the org's routing destinations.
+message GetDestinationsRequest {
+  // organization_id is the org.
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+// GetDestinationsResponse returns the org's routing destinations.
+message GetDestinationsResponse {
+  // destinations are the configured usecase → channel routes of every scope.
+  repeated Destination destinations = 1;
+}
+
+// SetDestinationRequest upserts one routing destination.
+message SetDestinationRequest {
+  // organization_id is the org.
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  // destination is the route to upsert.
+  Destination destination = 2 [(buf.validate.field).required = true];
+}
+
+// SetDestinationResponse is the empty ack.
+message SetDestinationResponse {}
+
+// PurgeOrgCommsRequest deletes an org's comms data. Suppressions survive.
+message PurgeOrgCommsRequest {
+  // organization_id is the org whose comms data to delete.
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+// PurgeOrgCommsResponse reports the deleted message count (audit).
+message PurgeOrgCommsResponse {
+  // deleted_messages is the number of comms_messages rows removed.
+  int64 deleted_messages = 1;
+}

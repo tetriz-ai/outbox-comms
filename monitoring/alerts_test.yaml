@@ -1,0 +1,172 @@
+# Unit tests for the alerts in alerts.yaml: promtool test rules monitoring/alerts_test.yaml
+# Asserts fire/silent behaviour, not just that the PromQL parses. exp_annotations
+# mirror the rules verbatim on purpose — editing an alert message must update
+# this test, keeping the two in sync.
+rule_files:
+  - alerts.yaml
+evaluation_interval: 1m
+tests:
+  # Bounce rate above the 5% guard for 15m -> OutboxCommsBounceRateHigh fires;
+  # complaint rate held below its guard -> OutboxCommsComplaintRateHigh silent.
+  - interval: 1m
+    input_series:
+      - series: 'outbox_comms_bounce_rate'
+        values: '0.08x20'
+      - series: 'outbox_comms_complaint_rate'
+        values: '0.0001x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: OutboxCommsBounceRateHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: outbox-comms
+            exp_annotations:
+              summary: "Hard-bounce rate > 5%"
+              description: "Rolling hard-bounce rate is 8%, above the 5% guard (SES can pause a sender near 10%). The rate reads 0 until the window holds OUTBOX_COMMS_REPUTATION_MIN_SENDS email sends (outbox_comms_reputation_sample_sends). The suppression list is the primary defence — check for a bad batch or a list of invalid addresses, and confirm new sends are being suppressed."
+      - eval_time: 16m
+        alertname: OutboxCommsComplaintRateHigh
+        exp_alerts: []
+
+  # A small sample: the service reports both rates as 0 below
+  # OUTBOX_COMMS_REPUTATION_MIN_SENDS, so a few bounces in a few sends stay silent.
+  - interval: 1m
+    input_series:
+      - series: 'outbox_comms_bounce_rate'
+        values: '0x20'
+      - series: 'outbox_comms_complaint_rate'
+        values: '0x20'
+      - series: 'outbox_comms_reputation_sample_sends'
+        values: '20x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: OutboxCommsBounceRateHigh
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: OutboxCommsComplaintRateHigh
+        exp_alerts: []
+
+  # Bounce rate healthy (under 5%) -> BounceRateHigh stays silent.
+  - interval: 1m
+    input_series:
+      - series: 'outbox_comms_bounce_rate'
+        values: '0.01x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: OutboxCommsBounceRateHigh
+        exp_alerts: []
+
+  # Complaint rate above the 0.1% guard for 15m -> ComplaintRateHigh fires.
+  - interval: 1m
+    input_series:
+      - series: 'outbox_comms_complaint_rate'
+        values: '0.002x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: OutboxCommsComplaintRateHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: outbox-comms
+            exp_annotations:
+              summary: "Complaint rate > 0.1%"
+              description: "Rolling complaint rate is 0.2%, above the 0.1% guard (SES can pause a sender near 0.5%). The rate reads 0 until the window holds OUTBOX_COMMS_REPUTATION_MIN_SENDS email sends (outbox_comms_reputation_sample_sends). Complaints mean recipients are marking mail as spam — review recent send content and volume; sustained complaints risk a paused sender."
+
+  # >5 DEAD in incident reason classes within 1h -> DeadIncidentSpike fires
+  # (for: 0m). transient_exhausted is excluded, so a customer-side bad-address
+  # burst alone must NOT fire this.
+  - interval: 1m
+    input_series:
+      - series: 'outbox_comms_dead_total{reason_class="render_bug"}'
+        values: '0+1x70'
+      - series: 'outbox_comms_dead_total{reason_class="transient_exhausted"}'
+        values: '0+5x70'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: OutboxCommsDeadIncidentSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: outbox-comms
+            exp_annotations:
+              summary: "DEAD spike in incident reason classes"
+              description: "60 messages went DEAD with reason_class permanent_config/render_bug in the last hour — a config or template bug on the sending side. Fix the cause before re-driving with `outbox-comms admin redrive-dead` (a render-bug or bad-channel DEAD re-driven unchanged goes DEAD again)."
+
+  # permanent_config alone also fires it: the matcher names both incident
+  # classes.
+  - interval: 1m
+    input_series:
+      - series: 'outbox_comms_dead_total{reason_class="permanent_config"}'
+        values: '0+1x70'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: OutboxCommsDeadIncidentSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: outbox-comms
+            exp_annotations:
+              summary: "DEAD spike in incident reason classes"
+              description: "60 messages went DEAD with reason_class permanent_config/render_bug in the last hour — a config or template bug on the sending side. Fix the cause before re-driving with `outbox-comms admin redrive-dead` (a render-bug or bad-channel DEAD re-driven unchanged goes DEAD again)."
+
+  # Only customer-side transient_exhausted DEADs -> DeadIncidentSpike silent.
+  - interval: 1m
+    input_series:
+      - series: 'outbox_comms_dead_total{reason_class="transient_exhausted"}'
+        values: '0+10x70'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: OutboxCommsDeadIncidentSpike
+        exp_alerts: []
+
+  # Overdue-pending non-zero for 30m -> RetriesNotDraining fires.
+  - interval: 1m
+    input_series:
+      - series: 'outbox_comms_overdue_pending'
+        values: '12x40'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: OutboxCommsRetriesNotDraining
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: outbox-comms
+            exp_annotations:
+              summary: "Retry tasks not draining"
+              description: "12 FAILED messages are past next_retry_at but still pending for 30m; the retry tasks are not draining them. Check the workers and Redis; reconcile is the backstop, but the retry tasks should be doing this."
+
+  # Overdue-pending at zero -> RetriesNotDraining silent (healthy push path).
+  - interval: 1m
+    input_series:
+      - series: 'outbox_comms_overdue_pending'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: OutboxCommsRetriesNotDraining
+        exp_alerts: []
+
+  # Any orphan feedback in the trailing hour -> OrphanFeedback fires (no for:).
+  - interval: 1m
+    input_series:
+      - series: 'outbox_comms_orphan_feedback_total'
+        values: '0+1x70'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: OutboxCommsOrphanFeedback
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: outbox-comms
+            exp_annotations:
+              summary: "Email feedback events have no matching message"
+              description: "60 email feedback events in the last hour matched no dispatched message. The provider_message_id correlation may be broken: delivery, bounce and complaint status is being lost for those messages."
+
+  # No orphan feedback in the trailing hour -> OrphanFeedback stays silent.
+  - interval: 1m
+    input_series:
+      - series: 'outbox_comms_orphan_feedback_total'
+        values: '3x70'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: OutboxCommsOrphanFeedback
+        exp_alerts: []

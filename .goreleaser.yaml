@@ -1,0 +1,28 @@
+version: 2
+builds:
+  - id: outbox-comms
+    main: ./cmd/outbox-comms
+    binary: outbox-comms
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags: ["-s -w -X github.com/tetriz-ai/outbox-comms/cli.Version={{.Tag}}"]
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - NOTICE
+      - README.md
+      - docs/*
+      - third_party/**/*
+checksum:
+  name_template: checksums.txt
+changelog:
+  disable: true
+release:
+  github:
+    owner: tetriz-ai
+    name: outbox-comms

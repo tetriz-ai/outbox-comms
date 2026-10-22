@@ -1,0 +1,169 @@
+// Copyright 2026 Workloom Solutions Private Limited
+// SPDX-License-Identifier: MIT
+
+syntax = "proto3";
+
+package outboxcomms.v1;
+
+option go_package = "github.com/tetriz-ai/outbox-comms/gen/outboxcomms/v1;outboxcommsv1";
+
+// Channel is the delivery medium: email or Slack.
+enum Channel {
+  // CHANNEL_UNSPECIFIED means the channel was not set; rejected at submit.
+  CHANNEL_UNSPECIFIED = 0;
+  // CHANNEL_EMAIL is email delivery (SMTP or Amazon SES).
+  CHANNEL_EMAIL = 1;
+  // CHANNEL_SLACK is Slack channel delivery through the Slack Web API.
+  CHANNEL_SLACK = 2;
+}
+
+// Vendor is the provider backing a channel, resolved from config at fan-out. A
+// usecase's renderer is keyed by (channel, vendor), so one usecase can render
+// differently for SES and SMTP.
+enum Vendor {
+  // VENDOR_UNSPECIFIED means the vendor was not resolved.
+  VENDOR_UNSPECIFIED = 0;
+  // VENDOR_SES is Amazon SES, backing CHANNEL_EMAIL.
+  VENDOR_SES = 1;
+  // VENDOR_SLACK is a Slack app's bot token, backing CHANNEL_SLACK.
+  VENDOR_SLACK = 2;
+  // VENDOR_SMTP is any SMTP relay, backing CHANNEL_EMAIL.
+  VENDOR_SMTP = 3;
+}
+
+// TargetKind is the kind of recipient an entry carries.
+enum TargetKind {
+  // TARGET_KIND_UNSPECIFIED means the target kind was not set; rejected at submit.
+  TARGET_KIND_UNSPECIFIED = 0;
+  // TARGET_KIND_EMAIL_ADDRESS is a concrete email address.
+  TARGET_KIND_EMAIL_ADDRESS = 1;
+  // TARGET_KIND_SLACK_CHANNEL is a concrete Slack channel id.
+  TARGET_KIND_SLACK_CHANNEL = 2;
+  // TARGET_KIND_CONFIGURED_DESTINATION carries a destination_scope the fan-out
+  // resolves against comms_channel_destinations: routing, not audience.
+  TARGET_KIND_CONFIGURED_DESTINATION = 3;
+}
+
+// EntityType is the scope tier of a preference or destination row (and of a
+// CONFIGURED_DESTINATION entry's destination_scope).
+enum EntityType {
+  // ENTITY_TYPE_UNSPECIFIED means the entity type was not set.
+  ENTITY_TYPE_UNSPECIFIED = 0;
+  // ENTITY_TYPE_ORG is the organization tier (admin-configured defaults).
+  ENTITY_TYPE_ORG = 1;
+  // ENTITY_TYPE_PERSON is the per-person tier (overrides ORG).
+  ENTITY_TYPE_PERSON = 2;
+}
+
+// MessageCategory is the coarse consent class, derived from the usecase (not
+// stored on a message). It drives the preference gate and transactional-bypass.
+enum MessageCategory {
+  // MESSAGE_CATEGORY_UNSPECIFIED means the category was not set.
+  MESSAGE_CATEGORY_UNSPECIFIED = 0;
+  // MESSAGE_CATEGORY_TRANSACTIONAL always sends and bypasses the preference gate.
+  MESSAGE_CATEGORY_TRANSACTIONAL = 1;
+  // MESSAGE_CATEGORY_ALERT is on by default with an opt-out.
+  MESSAGE_CATEGORY_ALERT = 2;
+  // MESSAGE_CATEGORY_PRODUCT is on by default with an opt-out.
+  MESSAGE_CATEGORY_PRODUCT = 3;
+  // MESSAGE_CATEGORY_MARKETING is gated like PRODUCT; it has no unsubscribe flow.
+  MESSAGE_CATEGORY_MARKETING = 4;
+}
+
+// DeliveryGuarantee is the caller knob governing the uncertain-send fork.
+enum DeliveryGuarantee {
+  // DELIVERY_GUARANTEE_UNSPECIFIED falls back to the usecase default.
+  DELIVERY_GUARANTEE_UNSPECIFIED = 0;
+  // DELIVERY_GUARANTEE_GUARANTEED retries an uncertain send (accepts a rare duplicate).
+  DELIVERY_GUARANTEE_GUARANTEED = 1;
+  // DELIVERY_GUARANTEE_BEST_EFFORT stops an uncertain send at UNCONFIRMED (accepts a rare miss).
+  DELIVERY_GUARANTEE_BEST_EFFORT = 2;
+}
+
+// VerificationLevel is how far comms tracks a send. A per-usecase registry
+// attribute, not a producer field.
+enum VerificationLevel {
+  // VERIFICATION_LEVEL_UNSPECIFIED means the level was not resolved.
+  VERIFICATION_LEVEL_UNSPECIFIED = 0;
+  // VERIFICATION_LEVEL_PROVIDER_ACK tracks up to the provider acknowledgement.
+  VERIFICATION_LEVEL_PROVIDER_ACK = 1;
+  // VERIFICATION_LEVEL_CONFIRMED tracks a true delivery confirmation (UNCONFIRMED if absent).
+  VERIFICATION_LEVEL_CONFIRMED = 2;
+}
+
+// MessageStatus is the server-owned per-message lifecycle. There is no SCHEDULED
+// state: every message dispatches immediately.
+enum MessageStatus {
+  // MESSAGE_STATUS_UNSPECIFIED means the status was not set.
+  MESSAGE_STATUS_UNSPECIFIED = 0;
+  // MESSAGE_STATUS_QUEUED is materialized and awaiting dispatch.
+  MESSAGE_STATUS_QUEUED = 1;
+  // MESSAGE_STATUS_SENDING is a dispatch in flight (CAS-claimed).
+  MESSAGE_STATUS_SENDING = 2;
+  // MESSAGE_STATUS_SENT is acked by the provider (email).
+  MESSAGE_STATUS_SENT = 3;
+  // MESSAGE_STATUS_DELIVERED is confirmed delivered (Slack ack = delivery).
+  MESSAGE_STATUS_DELIVERED = 4;
+  // MESSAGE_STATUS_UNCONFIRMED is acked-but-unconfirmed or an uncertain BEST_EFFORT send.
+  MESSAGE_STATUS_UNCONFIRMED = 5;
+  // MESSAGE_STATUS_FAILED is a transient/uncertain-GUARANTEED failure awaiting retry.
+  MESSAGE_STATUS_FAILED = 6;
+  // MESSAGE_STATUS_DEAD is a terminal failure (retries exhausted or permanent).
+  MESSAGE_STATUS_DEAD = 7;
+  // MESSAGE_STATUS_SUPPRESSED is a pre-send suppression hit (email).
+  MESSAGE_STATUS_SUPPRESSED = 8;
+  // MESSAGE_STATUS_BOUNCED is a bounce/complaint terminal.
+  MESSAGE_STATUS_BOUNCED = 9;
+  // MESSAGE_STATUS_SKIPPED is a deliberate non-send (opt-out / no destination).
+  MESSAGE_STATUS_SKIPPED = 10;
+}
+
+// RequestStatus is the server-owned per-request lifecycle (the fan-out rollup).
+enum RequestStatus {
+  // REQUEST_STATUS_UNSPECIFIED means the status was not set.
+  REQUEST_STATUS_UNSPECIFIED = 0;
+  // REQUEST_STATUS_ACCEPTED is persisted and enqueued, awaiting fan-out.
+  REQUEST_STATUS_ACCEPTED = 1;
+  // REQUEST_STATUS_FANNING_OUT is a fan-out in progress.
+  REQUEST_STATUS_FANNING_OUT = 2;
+  // REQUEST_STATUS_FANNED_OUT is fully materialized into message rows.
+  REQUEST_STATUS_FANNED_OUT = 3;
+  // REQUEST_STATUS_FANOUT_FAILED is a fan-out that failed terminally.
+  REQUEST_STATUS_FANOUT_FAILED = 4;
+}
+
+// DeliveryEventType is the kind of provider event recorded on
+// comms_delivery_events.
+enum DeliveryEventType {
+  // DELIVERY_EVENT_TYPE_UNSPECIFIED means the event type was not set.
+  DELIVERY_EVENT_TYPE_UNSPECIFIED = 0;
+  // DELIVERY_EVENT_TYPE_SENT is a provider-accepted send.
+  DELIVERY_EVENT_TYPE_SENT = 1;
+  // DELIVERY_EVENT_TYPE_FAILED is a send failure.
+  DELIVERY_EVENT_TYPE_FAILED = 2;
+  // DELIVERY_EVENT_TYPE_DELIVERED is a confirmed delivery.
+  DELIVERY_EVENT_TYPE_DELIVERED = 3;
+  // DELIVERY_EVENT_TYPE_BOUNCE is a hard/soft bounce.
+  DELIVERY_EVENT_TYPE_BOUNCE = 4;
+  // DELIVERY_EVENT_TYPE_COMPLAINT is a spam complaint.
+  DELIVERY_EVENT_TYPE_COMPLAINT = 5;
+}
+
+// DestinationKind is the kind of chat destination a comms_channel_destinations
+// row points at: a channel.
+enum DestinationKind {
+  // DESTINATION_KIND_UNSPECIFIED means the kind was not set.
+  DESTINATION_KIND_UNSPECIFIED = 0;
+  // DESTINATION_KIND_CHANNEL is a chat channel id.
+  DESTINATION_KIND_CHANNEL = 1;
+}
+
+// SlackDelivery is the Slack rendering mode for a SLACK entry.
+enum SlackDelivery {
+  // SLACK_DELIVERY_UNSPECIFIED must be set on any non-SLACK entry.
+  SLACK_DELIVERY_UNSPECIFIED = 0;
+  // SLACK_DELIVERY_LINK posts a Block Kit message with a producer-supplied URL.
+  SLACK_DELIVERY_LINK = 1;
+  // SLACK_DELIVERY_FILE uploads the attachment as a native Slack file.
+  SLACK_DELIVERY_FILE = 2;
+}

@@ -1,0 +1,40 @@
+version: "2"
+run:
+  tests: true
+  # Lint the e2e lifecycle test too; scripts/e2e.sh runs it.
+  build-tags: [e2e]
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+linters:
+  default: standard
+  enable:
+    - misspell
+    - revive
+  settings:
+    errcheck:
+      # Writes to the command's stdout and stderr: a failed write to a closed
+      # terminal has no recovery, and checking each one only adds noise.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+  exclusions:
+    generated: strict
+    paths:
+      - gen/
+    rules:
+      # asynq marks EnqueueErrorHandler deprecated in favour of PostEnqueueFunc,
+      # but PostEnqueueFunc gets a nil TaskInfo on failure, so only the
+      # deprecated hook can name the task whose tick was lost (asynq v0.26.0).
+      - path: internal/scheduler/scheduler.go
+        linters: [staticcheck]
+        text: "SA1019: .*EnqueueErrorHandler is deprecated"
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/tetriz-ai/outbox-comms

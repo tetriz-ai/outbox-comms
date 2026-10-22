@@ -1,0 +1,95 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    name: Go ${{ matrix.go }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.26.x', '1.27.x']
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: outbox
+          POSTGRES_PASSWORD: outbox-local-only
+          POSTGRES_DB: outbox_comms
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U outbox -d outbox_comms"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+      redis:
+        image: redis:8.10-alpine
+        ports: ['6379:6379']
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      GOTOOLCHAIN: local
+      OUTBOX_COMMS_TEST_DATABASE_URL: postgres://outbox:outbox-local-only@localhost:5432/outbox_comms?sslmode=disable
+      OUTBOX_COMMS_TEST_REDIS_ADDR: localhost:6379
+      OUTBOX_COMMS_REQUIRE_TEST_DB: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ matrix.go }}
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+      - run: go vet -tags e2e ./e2e/...
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.3'
+      - name: Install pinned tools
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          go install github.com/bufbuild/buf/cmd/buf@v1.66.0
+          go install github.com/zricethezav/gitleaks/v8@v8.24.3
+      - run: golangci-lint run
+      - run: govulncheck ./...
+      - run: gitleaks git --redact
+      - name: Check proto generation
+        run: |
+          buf lint
+          buf generate
+          git diff --exit-code -- gen/
+          test -z "$(git ls-files --others --exclude-standard gen/)"
+      - name: Check scripts and alerts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck prometheus
+          shellcheck scripts/*.sh examples/*/run.sh
+          promtool check rules monitoring/alerts.yaml
+          promtool test rules monitoring/alerts_test.yaml
+
+  examples:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.3'
+      - run: docker compose up -d --build --wait
+      - run: scripts/run-examples.sh
+      - run: scripts/acceptance.sh
+      - run: scripts/e2e.sh
+      - if: always()
+        run: docker compose down -v

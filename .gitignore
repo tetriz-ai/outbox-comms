@@ -1,0 +1,16 @@
+# Build output
+/outbox-comms
+/dist/
+*.test
+*.out
+coverage.*
+
+# Local runs
+/data/
+.env
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

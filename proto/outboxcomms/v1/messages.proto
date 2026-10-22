@@ -1,0 +1,302 @@
+// Copyright 2026 Workloom Solutions Private Limited
+// SPDX-License-Identifier: MIT
+
+syntax = "proto3";
+
+package outboxcomms.v1;
+
+option go_package = "github.com/tetriz-ai/outbox-comms/gen/outboxcomms/v1;outboxcommsv1";
+
+import "buf/validate/validate.proto";
+import "outboxcomms/v1/content.proto";
+import "outboxcomms/v1/enums.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// DestinationScope identifies an entity whose configured channel destination the
+// fan-out resolves against comms_channel_destinations. Required iff the entry's
+// target_kind is CONFIGURED_DESTINATION; this is routing, not audience: the
+// producer still chose the entity.
+message DestinationScope {
+  // entity_type is the scope tier (ORG or PERSON).
+  EntityType entity_type = 1;
+  // entity_id is the org id for ORG (the request's organization_id) and the
+  // person id for PERSON (not the organization_id); any other scope is
+  // INVALID_ARGUMENT at submit.
+  string entity_id = 2 [(buf.validate.field).string.uuid = true, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
+}
+
+// CommsEntry is one producer-resolved recipient plus its per-recipient values.
+// The service fans entries into message rows; it never resolves an audience or
+// fetches values. A CONFIGURED_DESTINATION entry instead carries a
+// destination_scope the fan-out maps to its configured channel(s).
+message CommsEntry {
+  // channel is the delivery medium for this entry (EMAIL or SLACK).
+  Channel channel = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // target_kind is the kind of recipient this entry carries.
+  TargetKind target_kind = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // recipient is a concrete email address or Slack channel id. Empty (and
+  // server-resolved) when target_kind is CONFIGURED_DESTINATION; the min-length
+  // rule for concrete entries is handler-checked because of that exemption. At
+  // most 1024 bytes keeps the per-request unique index entry under Postgres's
+  // 2704-byte btree limit.
+  string recipient = 3 [(buf.validate.field).string.max_bytes = 1024];
+  // vars holds per-recipient render values (e.g. name); producer-supplied. The
+  // render merge is a shallow top-level override of the request's shared params.
+  google.protobuf.Struct vars = 4;
+  // slack_delivery is the Slack rendering mode (SLACK entries only). It must be
+  // UNSPECIFIED on a non-SLACK entry — handler-checked at submit.
+  SlackDelivery slack_delivery = 5;
+  // destination_scope is required iff target_kind is CONFIGURED_DESTINATION and
+  // must be unset otherwise — handler-checked at submit.
+  DestinationScope destination_scope = 6;
+  // content is the per-recipient renderable body (block-based content model). When
+  // set it is rendered for this entry; when unset the request-level content is used
+  // (whole-content selection, no deep merge). The per-recipient body (e.g. a user's
+  // own figures) rides here.
+  MessageContent content = 7;
+  // subject_person_id optionally names the person a concrete entry is about. When
+  // set, a non-transactional send is gated on that person's preferences (PERSON
+  // over ORG) as well as the org's; when empty, on the org's alone.
+  string subject_person_id = 8 [(buf.validate.field).string.uuid = true, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
+}
+
+// CommsEntries is the producer-resolved batch as stored on comms_requests.entries
+// (jsonb). A message, not a bare repeated field, so it round-trips through
+// protojson.
+message CommsEntries {
+  // entries is the producer-resolved batch the fan-out materializes into rows.
+  repeated CommsEntry entries = 1;
+}
+
+// RenderedPayload is the audit snapshot of what comms actually sent, stored on
+// comms_messages.rendered_content (jsonb). Email carries subject + html; Slack
+// carries the Block Kit JSON.
+message RenderedPayload {
+  // email_subject is the rendered email subject (EMAIL only).
+  string email_subject = 1;
+  // email_html is the rendered email HTML body (EMAIL only).
+  string email_html = 2;
+  // slack_blocks_json is the rendered Block Kit blocks as JSON (SLACK only).
+  string slack_blocks_json = 3;
+  // email_text is the plain-text alternative body (EMAIL only). Empty means the
+  // sender sends HTML only.
+  string email_text = 4;
+  // slack_text is the plain-text fallback Slack shows in notifications and to
+  // screen readers (SLACK only). Empty means the client derives one from the
+  // blocks.
+  string slack_text = 5;
+}
+
+// SubmitCommsRequest is the producer-facing front-door request. The producer
+// passes the shared params plus a batch of producer-resolved entries; comms
+// persists a comms_requests row and returns a handle.
+message SubmitCommsRequest {
+  // organization_id is the org the send belongs to.
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  // idempotency_key is producer-unique; (org, idempotency_key) is the dedup key
+  // and the handle.
+  string idempotency_key = 2 [(buf.validate.field).string = {min_len: 1, max_bytes: 255}];
+  // usecase is a key registered in the server's usecase registry; its contract
+  // supplies category, channels, verification, and the delivery_guarantee default.
+  string usecase = 3 [(buf.validate.field).string.min_len = 1];
+  // params holds the shared params, stored once on the request and validated
+  // against the usecase's typed schema.
+  google.protobuf.Struct params = 4;
+  // entries are the producer-resolved recipients (a batch); each becomes one
+  // message row. A larger send is the producer's to chunk.
+  repeated CommsEntry entries = 5 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 1000
+  }];
+  // delivery_guarantee optionally overrides the usecase default.
+  // defined_only rejects an unknown numeric enum at submit; UNSPECIFIED (the
+  // default) is allowed and resolves to the usecase default at fan-out.
+  DeliveryGuarantee delivery_guarantee = 6 [(buf.validate.field).enum.defined_only = true];
+  // analytics_id is an opaque producer label stored on the request.
+  string analytics_id = 7;
+  // content is the shared renderable body (block-based content model) used for any
+  // entry that carries no per-entry content. Per-channel overrides live inside it
+  // (MessageContent.email / .slack); the typed params still carry delivery-directive
+  // essentials (e.g. attachment_key) and submit-time invariants.
+  MessageContent content = 8;
+}
+
+// SubmitCommsResponse returns the request handle (== idempotency_key); a re-submit
+// with the same key returns the same handle without re-processing.
+message SubmitCommsResponse {
+  // handle is the dedup-stable request handle for status polling.
+  string handle = 1;
+}
+
+// GetCommsStatusRequest polls a submitted request by its handle.
+message GetCommsStatusRequest {
+  // organization_id is the org that owns the request.
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  // handle is the request handle returned by SubmitComms.
+  string handle = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+// MessageStatusItem is one materialized message's status in a request rollup.
+message MessageStatusItem {
+  // message_id is the comms_messages row id.
+  string message_id = 1;
+  // channel is the delivery medium.
+  Channel channel = 2;
+  // recipient is the concrete recipient (resolved at fan-out).
+  string recipient = 3;
+  // status is the message's current lifecycle state.
+  MessageStatus status = 4;
+  // skip_reason is set when status is SKIPPED.
+  string skip_reason = 5;
+  // dead_reason is set when status is DEAD.
+  string dead_reason = 6;
+  // updated_at is when the status last changed.
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+// GetCommsStatusResponse is the request plus its per-message rollup.
+message GetCommsStatusResponse {
+  // handle is the request handle.
+  string handle = 1;
+  // request_status is the fan-out lifecycle state of the request.
+  RequestStatus request_status = 2;
+  // is_partial is true when at least one message ended in a non-delivered
+  // terminal state (SKIPPED, DEAD, BOUNCED, SUPPRESSED or UNCONFIRMED), or when
+  // the fan-out failed (request_status FANOUT_FAILED). A failed fan-out usually
+  // sent nothing, but when an earlier run crashed after making some message
+  // rows and reconcile re-drove it, those rows exist and are sent as usual.
+  bool is_partial = 3;
+  // messages is the per-message breakdown.
+  repeated MessageStatusItem messages = 4;
+  // done is true once the request has fanned out (or its fan-out failed) and
+  // every message is in a terminal state of the message lifecycle, so no send
+  // or retry is left. A message that is QUEUED, SENDING, FAILED and waiting for
+  // a retry, or SENT while its usecase waits for a delivery event, keeps it
+  // false. Provider feedback can still move a terminal SENT or DELIVERED
+  // message, for example to BOUNCED.
+  bool done = 5;
+}
+
+// CheckSendEligibilityRequest is the advisory preflight (UX); read-only.
+message CheckSendEligibilityRequest {
+  // organization_id is the org the prospective send belongs to.
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  // usecase is the prospective send's registered usecase key.
+  string usecase = 2 [(buf.validate.field).string.min_len = 1];
+  // channels are the channels to check eligibility for.
+  repeated Channel channels = 3;
+  // person_id optionally scopes the check to a specific person: the preference
+  // check (PERSON over ORG), and, for TARGET_KIND_CONFIGURED_DESTINATION, the
+  // destination, which is then that person's (a PERSON-scoped entry).
+  string person_id = 4 [(buf.validate.field).string.uuid = true, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
+  // target_kind is the kind of entry the send would use. Only
+  // TARGET_KIND_CONFIGURED_DESTINATION checks for a configured Slack
+  // destination (no_destination): the person's when person_id is set, else the
+  // organization's, the scope the fan-out would resolve, with no fallback from
+  // one to the other. A set kind must suit every requested channel, as an
+  // entry's must at submit: EMAIL takes EMAIL_ADDRESS; SLACK takes SLACK_CHANNEL
+  // or CONFIGURED_DESTINATION. Any other pair, or an unknown kind, is
+  // INVALID_ARGUMENT. Unspecified is a send to a channel the caller names, which
+  // needs no configured route.
+  TargetKind target_kind = 5 [(buf.validate.field).enum.defined_only = true];
+}
+
+// ChannelEligibility is whether a prospective send would be eligible now on one
+// channel, with the blocking reasons if not.
+message ChannelEligibility {
+  // channel is the medium this verdict is for.
+  Channel channel = 1;
+  // eligible is whether a send would proceed now (advisory; the dispatcher re-checks).
+  bool eligible = 2;
+  // reasons lists the blocking reasons when not eligible, such as no_destination,
+  // opted_out or preference_lookup_failed.
+  repeated string reasons = 3;
+}
+
+// CheckSendEligibilityResponse is the per-channel advisory verdict.
+message CheckSendEligibilityResponse {
+  // channel_eligibility is the verdict per requested channel.
+  repeated ChannelEligibility channel_eligibility = 1;
+}
+
+// ListMessagesRequest pages the org's message history newest-first. The first
+// page omits the cursor; each subsequent page passes the previous page's
+// next_before_created_at + next_before_id (keyset on (created_at, id)).
+message ListMessagesRequest {
+  // organization_id is the org whose messages to list.
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  // before_created_at is the keyset cursor's created_at; unset on the first page.
+  google.protobuf.Timestamp before_created_at = 2;
+  // before_id is the keyset cursor's row id, tie-breaking equal created_at; unset on the first page.
+  string before_id = 3 [(buf.validate.field).string.uuid = true, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
+  // page_size caps the rows returned; the server clamps it to a sane maximum.
+  uint32 page_size = 4;
+}
+
+// MessageHistoryItem is one row of the message history — enough to render the
+// list without a per-row drill-down (events come from GetMessageEvents).
+message MessageHistoryItem {
+  // message_id is the comms_messages row id.
+  string message_id = 1;
+  // request_id is the owning request's id (groups a fan-out).
+  string request_id = 2;
+  // channel is the delivery medium.
+  Channel channel = 3;
+  // recipient is the concrete recipient (email address or Slack target).
+  string recipient = 4;
+  // status is the message's current lifecycle state.
+  MessageStatus status = 5;
+  // skip_reason is set when status is SKIPPED.
+  string skip_reason = 6;
+  // dead_reason is set when status is DEAD.
+  string dead_reason = 7;
+  // created_at is when the message row was materialized.
+  google.protobuf.Timestamp created_at = 8;
+  // updated_at is when the status last changed.
+  google.protobuf.Timestamp updated_at = 9;
+  // usecase is the usecase key the owning request was submitted for.
+  string usecase = 10;
+}
+
+// ListMessagesResponse is one page of history plus the cursor for the next page.
+message ListMessagesResponse {
+  // messages is the page, newest-first.
+  repeated MessageHistoryItem messages = 1;
+  // next_before_created_at is the created_at cursor to pass for the next page; unset when has_more is false.
+  google.protobuf.Timestamp next_before_created_at = 2;
+  // next_before_id is the row-id cursor to pass for the next page; empty when has_more is false.
+  string next_before_id = 3;
+  // has_more is whether another page exists.
+  bool has_more = 4;
+}
+
+// GetMessageEventsRequest selects one message's delivery-event timeline.
+message GetMessageEventsRequest {
+  // organization_id is the org that owns the message.
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  // message_id is the comms_messages row to read events for.
+  string message_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+// DeliveryEventItem is one provider/internal delivery event in the timeline.
+message DeliveryEventItem {
+  // event_type classifies the event (SENT, DELIVERED, BOUNCE, COMPLAINT, FAILED).
+  DeliveryEventType event_type = 1;
+  // provider_event_id is the vendor's event id when present (empty for internal events).
+  string provider_event_id = 2;
+  // occurred_at is when the event happened at the provider (or internally).
+  google.protobuf.Timestamp occurred_at = 3;
+}
+
+// GetMessageEventsResponse is the message's event timeline, oldest-first.
+message GetMessageEventsResponse {
+  // events is the delivery-event timeline, oldest-first.
+  repeated DeliveryEventItem events = 1;
+}

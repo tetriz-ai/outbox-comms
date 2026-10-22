@@ -1,0 +1,13 @@
+# Overrides for scripts/e2e.sh, which runs the service on the host so it can
+# kill and restart it: Postgres, Redis and Mailpit's SMTP port are published,
+# on 127.0.0.1 only, and the Slack stub answers at once.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:${OUTBOX_COMMS_PG_PORT:-5432}:5432"
+  redis:
+    ports:
+      - "127.0.0.1:${OUTBOX_COMMS_REDIS_PORT:-6379}:6379"
+  mailpit:
+    ports:
+      - "127.0.0.1:${OUTBOX_COMMS_SMTP_PORT:-1025}:1025"

@@ -1,0 +1,9 @@
+# Runs the published release image in place of a local build:
+#   docker compose -f compose.yaml -f compose.release.yaml up -d
+# Only the service pulls the release tag; synthetic providers build the local
+# demo target. Change the service tag here at each release.
+services:
+  outbox-comms:
+    image: ghcr.io/tetriz-ai/outbox-comms:v0.1.0
+    pull_policy: always
+    build: !reset null

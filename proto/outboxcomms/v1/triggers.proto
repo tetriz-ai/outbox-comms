@@ -1,0 +1,31 @@
+// Copyright 2026 Workloom Solutions Private Limited
+// SPDX-License-Identifier: MIT
+
+syntax = "proto3";
+
+package outboxcomms.v1;
+
+option go_package = "github.com/tetriz-ai/outbox-comms/gen/outboxcomms/v1;outboxcommsv1";
+
+// Internal queue trigger bodies. They are not producer-facing events: the
+// producer's only contract is the SubmitComms RPC. The durable DB row is the
+// source of truth, so a body carries only the ids needed to re-load it, and a lost
+// trigger is re-driven by reconcile from the row.
+
+// CommsRequestTrigger is the requests-queue body: the fan-out re-loads the
+// comms_requests row by (organization_id, request_id) and materializes it.
+message CommsRequestTrigger {
+  // organization_id is the request's org (the consumer's tenant scope).
+  string organization_id = 1;
+  // request_id is the comms_requests row id to fan out.
+  string request_id = 2;
+}
+
+// CommsDispatchTrigger is the dispatch-queue body: the dispatcher CAS-claims and
+// sends the comms_messages row by (organization_id, message_id).
+message CommsDispatchTrigger {
+  // organization_id is the message's org (the consumer's tenant scope).
+  string organization_id = 1;
+  // message_id is the comms_messages row id to dispatch.
+  string message_id = 2;
+}

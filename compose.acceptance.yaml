@@ -1,0 +1,14 @@
+# Overrides for scripts/acceptance.sh: the Slack stub holds each post 10 seconds,
+# so a worker can be killed mid-send, and reconcile runs every 5 seconds. The
+# 12-second send deadline outlasts the held post, and the stuck threshold is
+# 2.5 times it, the least the service accepts, so recovery is quick to watch.
+services:
+  slack-stub:
+    command: ["-addr", ":8090", "-delay", "10s"]
+  outbox-comms:
+    environment:
+      OUTBOX_COMMS_RECONCILE_CRON: "@every 5s"
+      OUTBOX_COMMS_SEND_TIMEOUT: 12s
+      OUTBOX_COMMS_STUCK_SENDING_AFTER: 30s
+      OUTBOX_COMMS_STUCK_REQUEST_AFTER: 15s
+      OUTBOX_COMMS_AGED_QUEUED_AFTER: 15s

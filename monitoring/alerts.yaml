@@ -1,0 +1,76 @@
+# Prometheus alert rules for outbox-comms. Load with rule_files; tests in
+# alerts_test.yaml run with `promtool test rules monitoring/alerts_test.yaml`.
+groups:
+  - name: outbox-comms
+    rules:
+      # Sender-reputation guards. Amazon SES can pause a sender near 10% bounce
+      # or 0.5% complaint; the alerts fire well below those levels, leaving room
+      # to react. The gauges have no labels; max() collapses duplicate scrape
+      # targets to one series.
+      - alert: OutboxCommsBounceRateHigh
+        expr: |
+          max(outbox_comms_bounce_rate) > 0.05
+        for: 15m
+        labels:
+          severity: "critical"
+          service: "outbox-comms"
+        annotations:
+          summary: "Hard-bounce rate > 5%"
+          description: "Rolling hard-bounce rate is {{ $value | humanizePercentage }}, above the 5% guard (SES can pause a sender near 10%). The rate reads 0 until the window holds OUTBOX_COMMS_REPUTATION_MIN_SENDS email sends (outbox_comms_reputation_sample_sends). The suppression list is the primary defence — check for a bad batch or a list of invalid addresses, and confirm new sends are being suppressed."
+
+      - alert: OutboxCommsComplaintRateHigh
+        expr: |
+          max(outbox_comms_complaint_rate) > 0.001
+        for: 15m
+        labels:
+          severity: "critical"
+          service: "outbox-comms"
+        annotations:
+          summary: "Complaint rate > 0.1%"
+          description: "Rolling complaint rate is {{ $value | humanizePercentage }}, above the 0.1% guard (SES can pause a sender near 0.5%). The rate reads 0 until the window holds OUTBOX_COMMS_REPUTATION_MIN_SENDS email sends (outbox_comms_reputation_sample_sends). Complaints mean recipients are marking mail as spam — review recent send content and volume; sustained complaints risk a paused sender."
+
+      # Incident signal: a DEAD burst in the config/render reason classes (not
+      # transient_exhausted, usually a bad address or channel) means a template
+      # or a destination config is broken; re-driving unchanged just re-DEADs.
+      - alert: OutboxCommsDeadIncidentSpike
+        expr: |
+          sum(increase(outbox_comms_dead_total{reason_class=~"permanent_config|render_bug"}[1h])) > 5
+        # 5m dampens a single-scrape transient (counter reset / window-boundary
+        # spike) without materially delaying a real burst.
+        for: 5m
+        labels:
+          severity: "warning"
+          service: "outbox-comms"
+        annotations:
+          summary: "DEAD spike in incident reason classes"
+          description: "{{ $value | humanize }} messages went DEAD with reason_class permanent_config/render_bug in the last hour — a config or template bug on the sending side. Fix the cause before re-driving with `outbox-comms admin redrive-dead` (a render-bug or bad-channel DEAD re-driven unchanged goes DEAD again)."
+
+      # Retry-path health: the retry tasks should drain FAILED rows whose
+      # next_retry_at has passed. A sustained non-zero overdue count means
+      # retries are not firing (worker down, or Redis unreachable); reconcile is
+      # the backstop but should not be load-bearing.
+      - alert: OutboxCommsRetriesNotDraining
+        expr: |
+          max(outbox_comms_overdue_pending) > 0
+        for: 30m
+        labels:
+          severity: "warning"
+          service: "outbox-comms"
+        annotations:
+          summary: "Retry tasks not draining"
+          description: "{{ $value | humanize }} FAILED messages are past next_retry_at but still pending for 30m; the retry tasks are not draining them. Check the workers and Redis; reconcile is the backstop, but the retry tasks should be doing this."
+
+      # Correlation gap: email feedback with no matching dispatched message. A
+      # sustained rate means the provider_message_id correlation is broken. p2:
+      # a broken correlation also starves the bounce and complaint gauges the
+      # two p1 guards read. increase[1h] is the dampening, so there is no for:.
+      - alert: OutboxCommsOrphanFeedback
+        expr: |
+          sum(increase(outbox_comms_orphan_feedback_total[1h])) > 0
+        for: 0m
+        labels:
+          severity: "warning"
+          service: "outbox-comms"
+        annotations:
+          summary: "Email feedback events have no matching message"
+          description: "{{ $value | humanize }} email feedback events in the last hour matched no dispatched message. The provider_message_id correlation may be broken: delivery, bounce and complaint status is being lost for those messages."

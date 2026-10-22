@@ -1,0 +1,157 @@
+// Copyright 2026 Workloom Solutions Private Limited
+// SPDX-License-Identifier: MIT
+
+syntax = "proto3";
+
+package outboxcomms.v1;
+
+option go_package = "github.com/tetriz-ai/outbox-comms/gen/outboxcomms/v1;outboxcommsv1";
+
+// The generic, semantic content model (the block-based template content model).
+// Producers assemble an unbounded stream of semantic blocks; comms owns a single
+// shared rendering engine per channel that styles them. Adding a new template or
+// content shape is producer-side data — it never grows comms layout code.
+
+// HeadingLevel classifies a Heading's prominence; the channel renderer maps it to
+// the channel-appropriate style (email <h*>, Slack header vs bold section).
+enum HeadingLevel {
+  // HEADING_LEVEL_UNSPECIFIED defaults to SECTION at render.
+  HEADING_LEVEL_UNSPECIFIED = 0;
+  // HEADING_LEVEL_TITLE is the lead/title heading (one per message, typically).
+  HEADING_LEVEL_TITLE = 1;
+  // HEADING_LEVEL_SECTION is a sub-section heading within the body.
+  HEADING_LEVEL_SECTION = 2;
+}
+
+// Direction is the qualitative valence of a Card/Stat; the renderer maps it to a
+// colour/marker (positive = good, negative = regression). Severity-neutral.
+enum Direction {
+  // DIRECTION_UNSPECIFIED means no valence; rendered neutral.
+  DIRECTION_UNSPECIFIED = 0;
+  // DIRECTION_POSITIVE is a favourable signal.
+  DIRECTION_POSITIVE = 1;
+  // DIRECTION_NEGATIVE is an unfavourable signal.
+  DIRECTION_NEGATIVE = 2;
+  // DIRECTION_NEUTRAL is an explicitly neutral signal (distinct from unset).
+  DIRECTION_NEUTRAL = 3;
+}
+
+// Heading is a titled break in the content. text is the heading text.
+message Heading {
+  // text is the heading line.
+  string text = 1;
+  // level is the heading prominence (defaults to SECTION when unset).
+  HeadingLevel level = 2;
+}
+
+// Paragraph is a block of body prose. text is plain text; the renderer escapes it
+// for the channel (no markup — use the escape-hatch blocks for raw markup).
+message Paragraph {
+  // text is the paragraph's plain-text body.
+  string text = 1;
+}
+
+// Card is a headline, body, optional action and valence.
+message Card {
+  // headline is the card's short title.
+  string headline = 1;
+  // body is the card's finding/detail prose.
+  string body = 2;
+  // action is the optional recommended next step; omitted when empty.
+  string action = 3;
+  // direction is the card's qualitative valence (drives colour/marker).
+  Direction direction = 4;
+}
+
+// Stat is one labelled metric with an optional delta and valence.
+message Stat {
+  // label is the metric name (e.g. "Orders").
+  string label = 1;
+  // value is the formatted metric value (producer pre-formats; renderer does not).
+  string value = 2;
+  // delta is the optional formatted change vs the prior period; omitted when empty.
+  string delta = 3;
+  // direction is the delta's valence (drives colour/marker).
+  Direction direction = 4;
+}
+
+// StatList is a group of metrics rendered together (a small stat strip/table).
+message StatList {
+  // stats is the ordered list of metrics.
+  repeated Stat stats = 1;
+}
+
+// Divider is a visual separator between blocks. No payload.
+message Divider {}
+
+// RawHtml is the EMAIL-only escape hatch for an art-directed template: the
+// producer owns the markup AND its escaping. The email renderer emits it verbatim
+// inside the theme chrome; the Slack renderer ignores it. Use sparingly.
+message RawHtml {
+  // html is the producer-owned, pre-escaped HTML fragment.
+  string html = 1;
+}
+
+// RawSlackBlocks is the SLACK-only escape hatch: a producer-owned bare Block Kit
+// blocks array (JSON). The Slack renderer splices it in verbatim; the email
+// renderer ignores it. Use sparingly.
+message RawSlackBlocks {
+  // blocks_json is the bare Block Kit blocks array as JSON (not a {"blocks":…} wrapper).
+  string blocks_json = 1;
+}
+
+// CallToAction is the message's primary action button/link.
+message CallToAction {
+  // label is the button text.
+  string label = 1;
+  // url is the action target; the block is omitted when url is empty.
+  string url = 2;
+}
+
+// ContentBlock is one semantic unit of the body. Exactly one block kind is set.
+message ContentBlock {
+  // block is the set kind for this position in the stream.
+  oneof block {
+    // heading is a titled break.
+    Heading heading = 1;
+    // paragraph is body prose.
+    Paragraph paragraph = 2;
+    // card is a headline, body, optional action and valence.
+    Card card = 3;
+    // stat_list is a group of metrics.
+    StatList stat_list = 4;
+    // divider is a visual separator.
+    Divider divider = 5;
+    // raw_html is the EMAIL-only raw-markup escape hatch.
+    RawHtml raw_html = 6;
+    // raw_slack_blocks is the SLACK-only raw-Block-Kit escape hatch.
+    RawSlackBlocks raw_slack_blocks = 7;
+  }
+}
+
+// RenderableContent is the channel-agnostic body the rendering engine walks into a
+// channel artifact (email subject+HTML, or Slack Block Kit). It is unbounded: any
+// number of blocks, of any kind.
+message RenderableContent {
+  // subject is the email subject / Slack header text. Required for EMAIL at render.
+  string subject = 1;
+  // greeting_name personalises the greeting ("Hi {name}"); degrades to a generic
+  // greeting when empty.
+  string greeting_name = 2;
+  // blocks is the ordered semantic body stream.
+  repeated ContentBlock blocks = 3;
+  // cta is the optional primary action; rendered as a button (email) / link (Slack).
+  CallToAction cta = 4;
+}
+
+// MessageContent carries the renderable body with optional per-channel overrides.
+// A channel renders its override when set, else base (no deep merge — whole-content
+// selection). Lets EMAIL HTML diverge from SLACK without two full producers.
+message MessageContent {
+  // base is the default content used by any channel without an override.
+  RenderableContent base = 1;
+  // email is the optional EMAIL-channel override (falls back to base).
+  RenderableContent email = 2;
+  // slack is the optional SLACK-channel override (falls back to base).
+  RenderableContent slack = 3;
+}

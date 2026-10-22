@@ -1,0 +1,145 @@
+{
+  "accent": "#33745a",
+  "disclosure": "Local SMTP inbox + Slack stub \u00b7 SENT is SMTP acceptance, not inbox-delivery confirmation",
+  "scenes": [
+    {
+      "title": "One request. Two channels.",
+      "blocks": [
+        {
+          "label": "YOUR APP",
+          "rows": [
+            "Your export is ready",
+            "Email \u2192 jane@example.com",
+            "Slack \u2192 C0EXPORTS"
+          ],
+          "box": [
+            36,
+            151,
+            488,
+            413
+          ],
+          "kind": "rows"
+        },
+        {
+          "label": "REQUEST KEY",
+          "rows": [
+            {
+              "text": "export-ready:2026-10-01",
+              "state": "accent"
+            },
+            "SubmitComms",
+            "Saved before dispatch"
+          ],
+          "box": [
+            576,
+            151,
+            488,
+            413
+          ],
+          "kind": "rows"
+        }
+      ],
+      "arrows": [
+        [
+          524,
+          350,
+          576,
+          350
+        ]
+      ]
+    },
+    {
+      "title": "Each message gets a tracked result.",
+      "blocks": [
+        {
+          "label": "EMAIL \u00b7 LOCAL SMTP",
+          "rows": [
+            {
+              "text": "MESSAGE_STATUS_SENT",
+              "state": "good"
+            },
+            "Your export is ready",
+            "Mailpit inbox: 1 message"
+          ],
+          "box": [
+            36,
+            151,
+            488,
+            413
+          ],
+          "kind": "rows"
+        },
+        {
+          "label": "SLACK \u00b7 LOCAL STUB",
+          "rows": [
+            {
+              "text": "MESSAGE_STATUS_DELIVERED",
+              "state": "good"
+            },
+            "C0EXPORTS",
+            "Stub received: 1 message"
+          ],
+          "box": [
+            576,
+            151,
+            488,
+            413
+          ],
+          "kind": "rows"
+        }
+      ],
+      "arrows": []
+    },
+    {
+      "title": "Retry the same key. No new messages.",
+      "blocks": [
+        {
+          "label": "REPEAT REQUEST",
+          "rows": [
+            "SubmitComms",
+            "Same idempotency key",
+            "Same handle returned"
+          ],
+          "box": [
+            36,
+            151,
+            488,
+            413
+          ],
+          "kind": "rows"
+        },
+        {
+          "label": "PROVIDER COUNTS",
+          "rows": [
+            {
+              "text": "Email: 1 \u2192 1",
+              "state": "good"
+            },
+            {
+              "text": "Slack: 1 \u2192 1",
+              "state": "good"
+            },
+            "Request-level deduplication"
+          ],
+          "box": [
+            576,
+            151,
+            488,
+            413
+          ],
+          "kind": "rows"
+        }
+      ],
+      "arrows": [
+        [
+          524,
+          350,
+          576,
+          350
+        ]
+      ]
+    }
+  ],
+  "name": "outbox-comms",
+  "output": "demo.gif"
+}

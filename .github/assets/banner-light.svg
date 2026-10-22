@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="200" viewBox="0 0 880 200" role="img" aria-labelledby="t">
+  <title id="t">outbox-comms: a gRPC service that stores each email and Slack send in Postgres first, then sends, retries and tracks it</title>
+  <rect width="880" height="200" rx="12" fill="#f6f8fa"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+    <text x="40" y="78" font-size="40" font-weight="700" fill="#1f2328">outbox-comms</text>
+    <text x="40" y="114" font-size="16" fill="#59636e">A gRPC service that stores each email and Slack</text>
+    <text x="40" y="137" font-size="16" fill="#59636e">send in Postgres first, then sends, retries and</text>
+    <text x="40" y="160" font-size="16" fill="#59636e">tracks it.</text>
+  </g>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">
+    <rect x="470" y="44" width="150" height="34" rx="6" fill="#ffffff"/>
+    <text x="545" y="66" text-anchor="middle" fill="#1f2328">SubmitComms</text>
+    <path d="M545 78 V100" stroke="#8c959f" stroke-width="2"/>
+    <rect x="470" y="100" width="150" height="34" rx="6" fill="#ffffff"/>
+    <text x="545" y="122" text-anchor="middle" fill="#1f2328">row: QUEUED</text>
+    <path d="M620 117 H660" stroke="#8c959f" stroke-width="2"/>
+    <path d="M660 117 L680 74 M660 117 L680 160" stroke="#8c959f" stroke-width="2" fill="none"/>
+    <rect x="680" y="57" width="164" height="34" rx="6" fill="#ffffff"/>
+    <text x="692" y="79" fill="#1f2328">email</text>
+    <text x="834" y="79" text-anchor="end" fill="#1a7f37">SENT</text>
+    <rect x="680" y="143" width="164" height="34" rx="6" fill="#ffffff"/>
+    <text x="692" y="165" fill="#1f2328">slack</text>
+    <text x="834" y="165" text-anchor="end" fill="#1a7f37">DELIVERED</text>
+  </g>
+</svg>
