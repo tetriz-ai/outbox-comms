@@ -7,6 +7,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Go 1.26+](https://img.shields.io/badge/go-1.26%2B-00ADD8.svg)
 
+<a href="https://www.producthunt.com/products/agentic-workflow-kit?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-tetriz-engineering-kit" target="_blank" rel="noopener noreferrer"><img alt="Tetriz Engineering Kit  - Open-source tools for everything around AI coding | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1296838&amp;theme=light&amp;t=1793345913841"></a>
+
 **outbox-comms sends your app's email and Slack messages, records each one before it sends it, and tracks what happened to it.**
 
 Your app makes one call: "send this to these people." outbox-comms saves that request in Postgres before anything else happens, then delivers it, retries what fails, and lets you ask at any time what happened to each message.
